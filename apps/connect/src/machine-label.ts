@@ -88,7 +88,7 @@ export async function assignMachineLabel(
   if (!row) return null;
   if (row.revokedAt !== null) return null;
 
-  const name = desiredName.trim();
+  const name = desiredName.trim().slice(0, 120);
   if (name.length > 0) {
     await db
       .update(machine)
@@ -160,7 +160,8 @@ export async function handleAssignMachineLabel(
     typeof body !== "object" ||
     body === null ||
     !("desiredName" in body) ||
-    typeof body.desiredName !== "string"
+    typeof body.desiredName !== "string" ||
+    body.desiredName.length > 120
   ) {
     return jsonError("invalid_request", 400);
   }

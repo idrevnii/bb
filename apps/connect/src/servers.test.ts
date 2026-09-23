@@ -28,6 +28,7 @@ import {
 import {
   assignMachineLabel,
   assignMachineLabelForCredential,
+  handleAssignMachineLabel,
   sanitizeMachineLabelBase,
 } from "./machine-label.js";
 import { SECURE_SESSION_COOKIE } from "./cloud-dev.js";
@@ -434,6 +435,36 @@ describe("machine label assignment", () => {
     await expect(
       assignMachineLabel(db, "ABC-12345-rest", "admin"),
     ).resolves.toBe("machine-abc12345");
+  });
+
+  it("rejects oversized machine names and bounds names stored by assignment", async () => {
+    const oversizedName = "a".repeat(121);
+    const response = await handleAssignMachineLabel(
+      new Request("https://owner.getbb.app/api/connect/machine-label", {
+        method: "POST",
+        body: JSON.stringify({ desiredName: oversizedName }),
+      }),
+      { DB: {} } as Parameters<typeof handleAssignMachineLabel>[1],
+    );
+    expect(response.status).toBe(400);
+
+    seedUser("acct-a");
+    db.insert(machine)
+      .values({
+        id: "machine-long-name",
+        userId: "acct-a",
+        credentialHash: "hash",
+        createdAt: now,
+      })
+      .run();
+    await assignMachineLabel(db, "machine-long-name", oversizedName);
+    expect(
+      db
+        .select({ name: machine.name })
+        .from(machine)
+        .where(eq(machine.id, "machine-long-name"))
+        .get()?.name,
+    ).toBe("a".repeat(120));
   });
 
   it("authenticates the assigning machine and refuses revoked credentials", async () => {

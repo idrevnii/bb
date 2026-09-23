@@ -21,6 +21,7 @@ import type { HostDaemonLogger } from "../logger.js";
 type ConnectTunnelState = "connected" | "reconnecting" | "offline";
 
 const SESSION_PRESENCE_INTERVAL_MS = 30_000;
+const SESSION_PRESENCE_TIMEOUT_MS = 10_000;
 
 export interface ConnectTunnelStatus {
   state: ConnectTunnelState;
@@ -153,7 +154,8 @@ export class ConnectTunnelClient {
   }
 
   async reportSessionPresence(): Promise<void> {
-    if (!this.machineCredential) return Promise.resolve();
+    const credential = this.machineCredential;
+    if (!credential) return Promise.resolve();
     if (this.sessionPresencePromise) return this.sessionPresencePromise;
     if (
       this.lastSessionPresenceAttemptAt !== null &&
@@ -166,15 +168,29 @@ export class ConnectTunnelClient {
     const gate = resolveTrustedConnectGate(this.options.serverUrl);
     const url = new URL("/api/connect/machine-session", gate.apiOrigin);
     this.lastSessionPresenceAttemptAt = Date.now();
+    const controller = new AbortController();
+    let timeoutId: ReturnType<typeof setTimeout>;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timeoutId = setTimeout(() => {
+        controller.abort();
+        reject(new Error("machine session presence timed out"));
+      }, SESSION_PRESENCE_TIMEOUT_MS);
+    });
     let pending: Promise<void>;
-    pending = this.fetchFn(url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-bb-connect-machine": this.machineCredential,
-      },
-      body: JSON.stringify({ name: this.options.hostName.slice(0, 120) }),
-    })
+    pending = Promise.race([
+      Promise.resolve().then(() =>
+        this.fetchFn(url, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-bb-connect-machine": credential,
+          },
+          body: JSON.stringify({ name: this.options.hostName.slice(0, 120) }),
+          signal: controller.signal,
+        }),
+      ),
+      timeout,
+    ])
       .then((response) => {
         if (!response.ok) {
           throw new Error(
@@ -183,6 +199,7 @@ export class ConnectTunnelClient {
         }
       })
       .finally(() => {
+        clearTimeout(timeoutId);
         if (this.sessionPresencePromise === pending) {
           this.sessionPresencePromise = undefined;
         }
@@ -241,7 +258,7 @@ export class ConnectTunnelClient {
         "content-type": "application/json",
         "x-bb-connect-machine": credential,
       },
-      body: JSON.stringify({ desiredName: this.options.hostName }),
+      body: JSON.stringify({ desiredName: this.options.hostName.slice(0, 120) }),
     })
       .then(async (response) => {
         if (response.status === 401 || response.status === 403) {
