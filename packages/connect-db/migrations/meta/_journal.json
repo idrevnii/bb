@@ -43,6 +43,20 @@
       "when": 1783989596863,
       "tag": "0005_label_claim_triggers",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1790196278341,
+      "tag": "0006_machine_server",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1790199431719,
+      "tag": "0007_machine_session_presence",
+      "breakpoints": true
     }
   ]
 }

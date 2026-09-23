@@ -101,6 +101,7 @@ export interface ServerConnectionOptions {
   onSessionOpened?: (
     session: HostDaemonSessionOpenResponse,
   ) => void | Promise<void>;
+  onHeartbeatAcknowledged?: () => void;
   onMachineEnvironment?: (
     environment: HostDaemonSessionOpenResponse["machineEnvironment"],
   ) => void;

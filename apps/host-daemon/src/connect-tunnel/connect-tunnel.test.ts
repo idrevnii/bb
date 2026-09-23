@@ -120,6 +120,40 @@ afterEach(async () => {
 });
 
 describe("ConnectTunnelClient", () => {
+  it("reports an accepted server session without a port share and throttles repeats", async () => {
+    const requests: Array<{
+      url: string;
+      credential: string | null;
+      body: unknown;
+    }> = [];
+    const client = new ConnectTunnelClient({
+      serverUrl: "https://owner.getbb.app",
+      hostName: "M4-A",
+      machineCredential: "bbcm_machine-secret",
+      logger,
+      fetchFn: async (input, init) => {
+        requests.push({
+          url: String(input),
+          credential: new Headers(init?.headers).get("x-bb-connect-machine"),
+          body: JSON.parse(String(init?.body)),
+        });
+        return new Response(null, { status: 204 });
+      },
+    });
+
+    await client.reportSessionPresence();
+    await client.reportSessionPresence();
+    expect(requests).toEqual([
+      {
+        url: "https://owner.getbb.app/api/connect/machine-session",
+        credential: "bbcm_machine-secret",
+        body: { name: "M4-A" },
+      },
+    ]);
+    expect(client.status().ports).toEqual([]);
+    client.shutdown();
+  });
+
   it("allows HTTP only for a local machine gate and derives ws URLs", () => {
     expect(
       resolveTrustedConnectGate("http://owner.bb.localhost:42745"),

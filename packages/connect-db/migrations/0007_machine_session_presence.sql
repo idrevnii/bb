@@ -1,0 +1,1 @@
+ALTER TABLE `machine` ADD `session_seen_at` integer;

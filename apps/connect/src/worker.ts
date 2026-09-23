@@ -26,6 +26,7 @@ import {
 import { serveWithCache } from "./cache.js";
 import { BB_ICON_DATA_URI } from "./bb-icon.js";
 import { handleAssignMachineLabel } from "./machine-label.js";
+import { handleMachineSessionPresence } from "./machine-session.js";
 import {
   publicConnectOrigin,
   resolveConnectRequestHost,
@@ -264,6 +265,9 @@ export default {
     if (url.pathname === "/api/connect/machine-label") {
       return handleAssignMachineLabel(request, env);
     }
+    if (url.pathname === "/api/connect/machine-session") {
+      return handleMachineSessionPresence(request, env);
+    }
     const host = resolveConnectRequestHost(request.headers, runtime);
     const parsed = parseVisitorHost(host, env.BASE_DOMAIN);
     if (!parsed) return text("bb connect: unknown host\n", 404);
@@ -354,7 +358,9 @@ export default {
       MACHINE_CREDENTIAL_HEADER,
     );
     if (isMachinePath && presentedMachineCredential !== null) {
-      if (target !== null) return text("bb connect: not found\n", 404);
+      if (target !== null || resolved.kind !== "server") {
+        return text("bb connect: not found\n", 404);
+      }
       const verified = await verifyMachineCredentialDetails(
         presentedMachineCredential,
         db,
@@ -365,7 +371,9 @@ export default {
       if (isHostManagementMutation(request, url.pathname)) {
         return text("bb connect: machine cannot manage hosts\n", 403);
       }
-      ctx.waitUntil(markMachineSeen(verified.machineId, db));
+      ctx.waitUntil(
+        markMachineSeen(verified.machineId, resolved.server.id, db),
+      );
       return stub.fetch(
         requestForTunnelDo(request, null, "machine", verified.machineId),
       );

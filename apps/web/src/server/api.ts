@@ -200,8 +200,10 @@ export interface MachineSummary {
   id: string;
   name: string | null;
   subdomain: string | null;
+  serverId: string | null;
   online: boolean;
   lastSeenAt: number | null;
+  sessionSeenAt: number | null;
   createdAt: number;
 }
 
@@ -288,7 +290,9 @@ export async function getAccountState(
       id: machine.id,
       name: machine.name,
       subdomain: machine.subdomain,
+      serverId: machine.serverId,
       lastSeenAt: machine.lastSeenAt,
+      sessionSeenAt: machine.sessionSeenAt,
       createdAt: machine.createdAt,
     })
     .from(machine)
@@ -297,13 +301,17 @@ export async function getAccountState(
   const machines = machineRows
     .map((row) => {
       const lastSeenMs = row.lastSeenAt?.getTime() ?? null;
+      const sessionSeenMs = row.sessionSeenAt?.getTime() ?? null;
       return {
         id: row.id,
         name: row.name,
         subdomain: row.subdomain,
+        serverId: row.serverId,
         online:
-          lastSeenMs != null && now - lastSeenMs < SERVER_OFFLINE_AFTER_MS,
+          sessionSeenMs != null &&
+          now - sessionSeenMs < SERVER_OFFLINE_AFTER_MS,
         lastSeenAt: lastSeenMs,
+        sessionSeenAt: sessionSeenMs,
         createdAt: row.createdAt.getTime(),
       };
     })
@@ -678,6 +686,11 @@ export async function removeServer(
     return { error: "connected" };
   }
 
+  await db
+    .update(machine)
+    .set({ serverId: null })
+    .where(and(eq(machine.userId, userId), eq(machine.serverId, srv.id)))
+    .run();
   await db.delete(server).where(eq(server.id, srv.id)).run();
   return { ok: true };
 }
@@ -782,6 +795,7 @@ export async function lookupMachineCodeForServerCredential(
 export async function redeemMachineCode(
   deps: Pick<Deps, "db" | "serverUrlTemplate">,
   code: string,
+  name?: string,
 ): Promise<
   | {
       credential: string;
@@ -820,6 +834,8 @@ export async function redeemMachineCode(
     .values({
       id: machineId,
       userId: row.userId,
+      serverId: row.serverId,
+      name: name?.trim() || null,
       credentialHash: await sha256Hex(credential),
       createdAt: new Date(),
     })

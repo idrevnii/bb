@@ -398,9 +398,23 @@ describe("machine label assignment", () => {
     await expect(
       assignMachineLabel(db, "machine-new", "  Sawyer Air!!!  "),
     ).resolves.toBe("sawyer-air-4");
+    expect(
+      db
+        .select({ name: machine.name })
+        .from(machine)
+        .where(eq(machine.id, "machine-new"))
+        .get()?.name,
+    ).toBe("Sawyer Air!!!");
     await expect(
       assignMachineLabel(db, "machine-new", "a totally different name"),
     ).resolves.toBe("sawyer-air-4");
+    expect(
+      db
+        .select({ name: machine.name })
+        .from(machine)
+        .where(eq(machine.id, "machine-new"))
+        .get()?.name,
+    ).toBe("a totally different name");
   });
 
   it("uses machine-<id-prefix> when the desired name is empty or invalid", async () => {

@@ -1094,6 +1094,14 @@ The tunnel client lives in `plugins/connect/`; the CLI command is proxied to
 the plugin, and Settings → Connect drives the plugin's rpc (including shared
 ports).
 
+The getbb.app dashboard marks a machine Online when its daemon has opened a bb
+server session and recently received a server heartbeat acknowledgement. The
+daemon reports that confirmed session to Connect every 30 seconds. Credential
+requests and port-share tunnels update activity history, but do not establish
+Online status. A confirmed session becomes Offline after 90 seconds without a
+fresh report. Machines without a confirmed session show their last activity
+without an Online or Offline dot.
+
 ### Pairing the bb mobile app
 
 The bb mobile app reaches a paired bb through the same connect route. It

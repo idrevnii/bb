@@ -814,6 +814,14 @@ export async function createHostDaemonApp(
     onSessionOpened: async (session) => {
       sessionState.value = session.sessionId;
       connectTunnel.replaceAuthoritativeShareSet(session.connectShares);
+      if (options.serverHeaders?.["x-bb-connect-machine"]) {
+        void connectTunnel.reportSessionPresence().catch((error: unknown) => {
+          options.logger.warn(
+            { err: error },
+            "Machine session presence failed",
+          );
+        });
+      }
       await pluginHostManager.reconcileGenerations(
         session.pluginHostGenerations,
       );
@@ -842,6 +850,11 @@ export async function createHostDaemonApp(
         );
       });
       void flushPendingInteractiveInterrupts();
+    },
+    onHeartbeatAcknowledged: () => {
+      void connectTunnel.reportSessionPresence().catch((error: unknown) => {
+        options.logger.warn({ err: error }, "Machine session presence failed");
+      });
     },
     setSession: (session) => {
       sessionState.value = session?.sessionId ?? null;

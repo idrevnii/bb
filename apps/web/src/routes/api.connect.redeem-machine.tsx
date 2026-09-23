@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { z } from "zod";
 import {
   connectApiResponse,
   depsFromEnv,
@@ -10,12 +11,19 @@ export const Route = createFileRoute("/api/connect/redeem-machine")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const body = (await request.json().catch(() => ({}))) as {
-          code?: string;
-        };
+        const body = z
+          .object({
+            code: z.string(),
+            name: z.string().trim().max(120).optional(),
+          })
+          .safeParse(await request.json().catch(() => null));
+        if (!body.success) {
+          return Response.json({ error: "invalid-request" }, { status: 400 });
+        }
         const result = await redeemMachineCode(
           depsFromEnv(getEnv()),
-          body.code ?? "",
+          body.data.code,
+          body.data.name,
         );
         return connectApiResponse(result);
       },

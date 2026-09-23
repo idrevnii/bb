@@ -138,6 +138,10 @@ vi.mock("./machine-label.js", () => ({
   handleAssignMachineLabel: vi.fn(),
 }));
 
+vi.mock("./machine-session.js", () => ({
+  handleMachineSessionPresence: vi.fn(),
+}));
+
 vi.mock("./cache.js", async () => {
   const actual =
     await vi.importActual<typeof import("./cache.js")>("./cache.js");
@@ -177,6 +181,7 @@ import {
 } from "./servers.js";
 import { SECURE_DESKTOP_SESSION_COOKIE as DESKTOP_SESSION_COOKIE } from "./cloud-dev.js";
 import { handleAssignMachineLabel } from "./machine-label.js";
+import { handleMachineSessionPresence } from "./machine-session.js";
 import { serveWithCache } from "./cache.js";
 import worker, { offlinePage, relativeTime, wantsHtml } from "./worker.js";
 import { TUNNEL_OFFLINE_HEADER, TunnelDO } from "./tunnel-do.js";
@@ -395,6 +400,29 @@ describe("POST /api/connect/machine-label", () => {
     expect(mockHandleAssignMachineLabel).toHaveBeenCalledWith(request, env);
     expect(mockResolveLabel).not.toHaveBeenCalled();
     expect(captured).toHaveLength(0);
+  });
+});
+
+describe("POST /api/connect/machine-session", () => {
+  it("routes presence before visitor label resolution", async () => {
+    vi.mocked(handleMachineSessionPresence).mockResolvedValue(
+      new Response(null, { status: 204 }),
+    );
+    const { env, ctx } = makeEnv(() => new Response("origin"));
+    const request = visitorRequest(
+      "unknown.getbb.app",
+      "/api/connect/machine-session",
+      {
+        method: "POST",
+        headers: { "x-bb-connect-machine": "bbcm_machine" },
+        body: JSON.stringify({ name: "M4-A" }),
+      },
+    );
+    const response = await worker.fetch(request, env as never, ctx);
+
+    expect(response.status).toBe(204);
+    expect(handleMachineSessionPresence).toHaveBeenCalledWith(request, env);
+    expect(mockResolveLabel).not.toHaveBeenCalled();
   });
 });
 
@@ -624,6 +652,7 @@ describe("machine gate auth", () => {
     ).toBe(true);
     expect(mockMarkMachineSeen).toHaveBeenCalledWith(
       "machine-owner",
+      "srv1",
       expect.anything(),
     );
   });

@@ -657,6 +657,7 @@ export class ServerConnection {
     if (message.data.type === "heartbeat-ack") {
       if (this.session !== null) {
         this.lastHeartbeatAcknowledgedAt = Date.now();
+        this.options.onHeartbeatAcknowledged?.();
       }
       return;
     }

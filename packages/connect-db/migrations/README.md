@@ -46,3 +46,20 @@ new machine TunnelDO/cache keys are generation-isolated from their first use.
 Server label resolution, cache/DO keys, disconnect, and reuse behavior remain
 exactly as on main. The pre-existing server-label reuse race is out of scope for
 this migration and must be handled as separate server hardening.
+
+## Machine-server migration deployment order
+
+Migration `0006_machine_server.sql` adds the nullable `machine.server_id`
+column. The gate worker records the server a machine credential reaches with
+each throttled presence write, and the web worker stores the pairing server on
+redeem and groups dashboard machines by it. Apply 0006 before deploying either
+worker. Machines paired before 0006 keep `server_id` NULL until their next
+request through a server label. The column has no foreign key because SQLite
+`ALTER TABLE ADD COLUMN` cannot carry `ON DELETE SET NULL` from the Drizzle
+diff; `removeServer` clears it before deleting the server row.
+
+Migration `0007_machine_session_presence.sql` adds `machine.session_seen_at`. The gate
+updates it only when a daemon with a valid machine credential reports an
+accepted bb server session. Apply 0007 before deploying the gate or dashboard
+workers that write or read this field. Credential request activity remains in
+`last_seen_at` and does not determine Online status.
