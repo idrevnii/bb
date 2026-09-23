@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ace58682-ba82-41d9-a863-c74bf25ebf78",
+  "id": "3f1f3f7c-79fc-4b4d-a043-7abce722712e",
   "prevId": "7ff3fbcf-840d-4547-8d1f-94d571998114",
   "tables": {
     "account": {
@@ -401,13 +401,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "server_id": {
-          "name": "server_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "credential_hash": {
           "name": "credential_hash",
           "type": "text",
@@ -417,6 +410,13 @@
         },
         "last_seen_at": {
           "name": "last_seen_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "session_seen_at": {
+          "name": "session_seen_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,

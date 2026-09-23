@@ -292,7 +292,6 @@ export async function verifyMachineCredentialDetails(
 
 export async function markMachineSeen(
   machineId: string,
-  serverId: string,
   db: ConnectDb,
   now: number = Date.now(),
 ): Promise<boolean> {
@@ -306,7 +305,7 @@ export async function markMachineSeen(
   machineLastSeenWrites.set(machineId, now);
   await db
     .update(machine)
-    .set({ lastSeenAt: new Date(now), serverId })
+    .set({ lastSeenAt: new Date(now) })
     .where(and(eq(machine.id, machineId), isNull(machine.revokedAt)))
     .run();
   return true;

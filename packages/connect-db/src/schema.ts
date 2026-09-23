@@ -144,7 +144,6 @@ export const machine = sqliteTable(
       .references(() => user.id, { onDelete: "cascade" }),
     name: text("name"),
     subdomain: text("subdomain").unique(),
-    serverId: text("server_id"),
     credentialHash: text("credential_hash").notNull(),
     lastSeenAt: timestampMs("last_seen_at"),
     sessionSeenAt: timestampMs("session_seen_at"),

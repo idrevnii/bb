@@ -412,30 +412,6 @@ describe("removeServer (delete a never-paired row)", () => {
     ).toBeDefined();
   });
 
-  it("detaches machines that connected through the removed server", async () => {
-    seedUser("u1");
-    await claimHandle(deps, "u1", "sawyer");
-    const desktop = await createServer(deps, "u1", "sawyer-desktop");
-    if (!("ok" in desktop)) throw new Error("setup");
-    db.insert(machine)
-      .values({
-        id: "machine-desktop",
-        userId: "u1",
-        serverId: desktop.server.id,
-        credentialHash: "machine-hash",
-        createdAt: new Date(),
-      })
-      .run();
-
-    expect(await removeServer(deps, "u1", desktop.server.id)).toEqual({
-      ok: true,
-    });
-    expect(
-      db.select().from(machine).where(eq(machine.id, "machine-desktop")).get()
-        ?.serverId,
-    ).toBeNull();
-  });
-
   it("refuses to remove the primary (account handle) row", async () => {
     seedUser("u1");
     await claimHandle(deps, "u1", "sawyer");
@@ -576,10 +552,6 @@ describe("server-authenticated machine-code round trip", () => {
     ).toEqual({ consumed: false, machineId: null });
     const redeemed = await redeemMachineCode(deps, minted.code, "Test machine");
     if ("error" in redeemed) throw new Error(redeemed.error);
-    expect(
-      db.select().from(machine).where(eq(machine.id, redeemed.machineId)).get()
-        ?.serverId,
-    ).toBe(target.server.id);
     expect(
       db
         .select({ name: machine.name })
@@ -722,7 +694,6 @@ describe("dashboard machine recovery", () => {
         id: "machine-owner",
         name: "lost laptop",
         subdomain: "lost-laptop",
-        serverId: null,
         online: true,
         lastSeenAt: now.getTime(),
         sessionSeenAt: now.getTime(),

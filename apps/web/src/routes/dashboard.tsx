@@ -859,76 +859,12 @@ function RowMenu({
   );
 }
 
-function MachineRow({
-  machine,
-  serverUrlTemplate,
-  onRevoke,
-}: {
-  machine: MachineSummary;
-  serverUrlTemplate: string;
-  onRevoke: (machine: MachineSummary) => void;
-}) {
-  const machineName =
-    machine.name ?? machine.subdomain ?? `Machine ${machine.id.slice(0, 8)}`;
-  return (
-    <div className="grid grid-cols-[14px_1fr_auto] items-center gap-2.5 rounded-lg px-2 py-2">
-      <span className="flex justify-center">
-        <StatusDot
-          state={
-            machine.online
-              ? "online"
-              : machine.sessionSeenAt !== null
-                ? "offline"
-                : "new"
-          }
-        />
-      </span>
-      <span className="min-w-0">
-        <span className="block truncate text-sm font-medium leading-tight">
-          {machineName}
-        </span>
-        <span className="mt-px block truncate text-xs text-muted-foreground">
-          {machine.online ? (
-            "Online"
-          ) : machine.sessionSeenAt !== null ? (
-            <>
-              <span className="text-warning-text">Offline</span>
-              {` · last connected ${relativeTime(machine.sessionSeenAt)}`}
-            </>
-          ) : machine.lastSeenAt !== null ? (
-            `No confirmed connection · last activity ${relativeTime(machine.lastSeenAt)}`
-          ) : (
-            "Never connected"
-          )}
-          {machine.subdomain !== null
-            ? ` · ${serverUrlTemplate
-                .replace("{label}", machine.subdomain)
-                .replace(/^https?:\/\//u, "")}`
-            : ""}
-        </span>
-      </span>
-      <button
-        className="text-xs text-destructive-text hover:underline"
-        onClick={() => onRevoke(machine)}
-      >
-        Revoke
-      </button>
-    </div>
-  );
-}
-
 function ServerRow({
   server,
   autoPair,
-  machines,
-  serverUrlTemplate,
-  onRevokeMachine,
 }: {
   server: ServerSummary;
   autoPair?: boolean;
-  machines: MachineSummary[];
-  serverUrlTemplate: string;
-  onRevokeMachine: (machine: MachineSummary) => void;
 }) {
   const [panel, setPanel] = useState<ServerPanel>(
     autoPair && !server.connected ? "setup" : "none",
@@ -943,11 +879,6 @@ function ServerRow({
   const menuItems = server.connected
     ? [
         { label: "Copy URL", onSelect: copyUrl },
-        {
-          label: "Manage machines",
-          onSelect: () =>
-            window.open(`${url}/settings/machines`, "_blank", "noreferrer"),
-        },
         {
           label: "Pair again…",
           onSelect: () => setPanel((p) => (p === "repair" ? "none" : "repair")),
@@ -1056,19 +987,6 @@ function ServerRow({
           ) : (
             <RepairCodeBlock serverId={server.id} />
           )}
-        </div>
-      )}
-
-      {machines.length > 0 && (
-        <div className="mb-1 ml-6">
-          {machines.map((machine) => (
-            <MachineRow
-              key={machine.id}
-              machine={machine}
-              serverUrlTemplate={serverUrlTemplate}
-              onRevoke={onRevokeMachine}
-            />
-          ))}
         </div>
       )}
 
@@ -1237,19 +1155,15 @@ function AccountDashboard({ state }: { state: ServerState }) {
       onServerCreated={(id) => setPendingId(id)}
     />
   );
-  const serverIds = new Set(
-    state.servers.map((server: ServerSummary) => server.id),
-  );
-  const otherMachines = state.machines.filter(
-    (machine: MachineSummary) =>
-      machine.serverId === null || !serverIds.has(machine.serverId),
-  );
+  const manageServer =
+    state.servers.find((server: ServerSummary) => server.online) ??
+    state.servers[0] ??
+    null;
 
   async function revoke(machine: MachineSummary) {
     await revokeMachineFn({ data: machine.id });
     await router.invalidate();
   }
-  const onRevokeMachine = (machine: MachineSummary) => void revoke(machine);
 
   return (
     <Shell top width="md" footer={<AccountFooter state={state} />}>
@@ -1268,38 +1182,83 @@ function AccountDashboard({ state }: { state: ServerState }) {
           </button>
         </div>
         {state.servers.map((s: ServerSummary) => (
-          <ServerRow
-            key={s.id}
-            server={s}
-            autoPair={single}
-            machines={state.machines.filter(
-              (machine: MachineSummary) => machine.serverId === s.id,
-            )}
-            serverUrlTemplate={state.serverUrlTemplate}
-            onRevokeMachine={onRevokeMachine}
-          />
+          <ServerRow key={s.id} server={s} autoPair={single} />
         ))}
       </div>
-      {otherMachines.length > 0 ? (
-        <div className="mt-3 rounded-xl border border-border bg-card p-2 shadow-sm">
-          <div className="px-3 pb-1.5 pt-1.5">
-            <h3 className="text-[15px] font-semibold tracking-tight">
-              Other machines
-            </h3>
-            <p className="mt-0.5 text-xs text-subtle-foreground">
-              Machines appear under their bb once they connect to it.
-            </p>
-          </div>
-          {otherMachines.map((machine: MachineSummary) => (
-            <MachineRow
-              key={machine.id}
-              machine={machine}
-              serverUrlTemplate={state.serverUrlTemplate}
-              onRevoke={onRevokeMachine}
-            />
-          ))}
+      <div className="mt-3 rounded-xl border border-border bg-card p-2 shadow-sm">
+        <div className="flex items-center px-3 pb-1.5 pt-1.5">
+          <h3 className="flex-1 text-[15px] font-semibold tracking-tight">
+            Machines
+          </h3>
+          {manageServer !== null ? (
+            <a
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-surface-recessed hover:text-foreground"
+              href={`${manageServer.serverUrl}/settings/machines`}
+            >
+              Manage machines in bb
+              <HugeiconsIcon icon={ArrowUpRight01Icon} className="size-3" />
+            </a>
+          ) : null}
         </div>
-      ) : null}
+        {state.machines.length === 0 ? (
+          <p className="px-3 pb-2 text-xs text-subtle-foreground">
+            Add machines from bb Settings → Machines.
+          </p>
+        ) : (
+          state.machines.map((machine: MachineSummary) => {
+            const machineName =
+              machine.name ??
+              machine.subdomain ??
+              `Machine ${machine.id.slice(0, 8)}`;
+            return (
+              <div
+                key={machine.id}
+                className="flex items-center gap-3 rounded-lg px-3 py-2.5"
+              >
+                <StatusDot
+                  state={
+                    machine.online
+                      ? "online"
+                      : machine.sessionSeenAt !== null
+                        ? "offline"
+                        : "new"
+                  }
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium leading-tight">
+                    {machineName}
+                  </span>
+                  <span className="mt-px block truncate text-xs text-muted-foreground">
+                    {machine.online ? (
+                      "Online"
+                    ) : machine.sessionSeenAt !== null ? (
+                      <>
+                        <span className="text-warning-text">Offline</span>
+                        {` · last connected ${relativeTime(machine.sessionSeenAt)}`}
+                      </>
+                    ) : machine.lastSeenAt !== null ? (
+                      `No confirmed connection · last activity ${relativeTime(machine.lastSeenAt)}`
+                    ) : (
+                      "Never connected"
+                    )}
+                    {machine.subdomain !== null
+                      ? ` · ${state.serverUrlTemplate
+                          .replace("{label}", machine.subdomain)
+                          .replace(/^https?:\/\//u, "")}`
+                      : ""}
+                  </span>
+                </span>
+                <button
+                  className="text-xs text-destructive-text hover:underline"
+                  onClick={() => void revoke(machine)}
+                >
+                  Revoke
+                </button>
+              </div>
+            );
+          })
+        )}
+      </div>
       {dialog}
     </Shell>
   );

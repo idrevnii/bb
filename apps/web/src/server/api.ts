@@ -200,7 +200,6 @@ export interface MachineSummary {
   id: string;
   name: string | null;
   subdomain: string | null;
-  serverId: string | null;
   online: boolean;
   lastSeenAt: number | null;
   sessionSeenAt: number | null;
@@ -290,7 +289,6 @@ export async function getAccountState(
       id: machine.id,
       name: machine.name,
       subdomain: machine.subdomain,
-      serverId: machine.serverId,
       lastSeenAt: machine.lastSeenAt,
       sessionSeenAt: machine.sessionSeenAt,
       createdAt: machine.createdAt,
@@ -306,7 +304,6 @@ export async function getAccountState(
         id: row.id,
         name: row.name,
         subdomain: row.subdomain,
-        serverId: row.serverId,
         online:
           sessionSeenMs != null &&
           now - sessionSeenMs < SERVER_OFFLINE_AFTER_MS,
@@ -686,11 +683,6 @@ export async function removeServer(
     return { error: "connected" };
   }
 
-  await db
-    .update(machine)
-    .set({ serverId: null })
-    .where(and(eq(machine.userId, userId), eq(machine.serverId, srv.id)))
-    .run();
   await db.delete(server).where(eq(server.id, srv.id)).run();
   return { ok: true };
 }
@@ -834,7 +826,6 @@ export async function redeemMachineCode(
     .values({
       id: machineId,
       userId: row.userId,
-      serverId: row.serverId,
       name: name?.trim() || null,
       credentialHash: await sha256Hex(credential),
       createdAt: new Date(),

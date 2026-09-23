@@ -652,7 +652,6 @@ describe("machine gate auth", () => {
     ).toBe(true);
     expect(mockMarkMachineSeen).toHaveBeenCalledWith(
       "machine-owner",
-      "srv1",
       expect.anything(),
     );
   });

@@ -358,9 +358,7 @@ export default {
       MACHINE_CREDENTIAL_HEADER,
     );
     if (isMachinePath && presentedMachineCredential !== null) {
-      if (target !== null || resolved.kind !== "server") {
-        return text("bb connect: not found\n", 404);
-      }
+      if (target !== null) return text("bb connect: not found\n", 404);
       const verified = await verifyMachineCredentialDetails(
         presentedMachineCredential,
         db,
@@ -371,9 +369,7 @@ export default {
       if (isHostManagementMutation(request, url.pathname)) {
         return text("bb connect: machine cannot manage hosts\n", 403);
       }
-      ctx.waitUntil(
-        markMachineSeen(verified.machineId, resolved.server.id, db),
-      );
+      ctx.waitUntil(markMachineSeen(verified.machineId, db));
       return stub.fetch(
         requestForTunnelDo(request, null, "machine", verified.machineId),
       );

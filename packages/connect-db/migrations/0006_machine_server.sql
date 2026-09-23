@@ -1,1 +1,0 @@
-ALTER TABLE `machine` ADD `server_id` text;
