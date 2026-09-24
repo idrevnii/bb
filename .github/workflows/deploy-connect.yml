@@ -64,8 +64,8 @@ jobs:
       # wrangler's esbuild bundles its workspace deps (@bb/connect-db,
       # @bb/tunnel-contract) straight from source. Plain wrangler uses the
       # top-level (production) config -> the bb-connect worker on *.getbb.app.
-      # This only uploads a version; it serves no traffic until someone deploys
-      # it gradually with `wrangler versions deploy`.
+      # This only uploads a version; it serves no traffic until the Roll out
+      # Connect gate workflow deploys it (docs/connect-gate-rollout.md).
       # BETTER_AUTH_SECRET is set once by hand (it must equal bb-web's) and
       # is intentionally NOT synced from CI.
       - name: Upload tunnel gate version
@@ -91,9 +91,7 @@ jobs:
           {
             echo "### Gate version uploaded, not deployed"
             echo
-            echo "Version \`$VERSION_ID\` serves no traffic yet. Roll it out by hand from \`apps/connect\`:"
-            echo
-            echo "- \`pnpm exec wrangler deployments status\` shows the version serving traffic (\`<old>\`)."
-            echo "- \`pnpm exec wrangler versions deploy $VERSION_ID@5% <old>@95% --yes\`, then 25%, then \`$VERSION_ID@100%\`, holding 15-30 minutes at each step."
-            echo "- Roll back with \`pnpm exec wrangler rollback <old> -m <reason>\`."
+            echo "Version \`$VERSION_ID\` serves no traffic yet."
+            echo "Roll it out with the **Roll out Connect gate** workflow at 0% (smoke), then 5%, 25% and 100%."
+            echo "See docs/connect-gate-rollout.md."
           } >> "$GITHUB_STEP_SUMMARY"

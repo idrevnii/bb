@@ -1,0 +1,185 @@
+name: Roll out Connect gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "production = bb-connect on *.getbb.app; staging = bb-connect-staging on *.vibecodethis.site"
+        type: choice
+        options:
+          - production
+          - staging
+        default: production
+      version_id:
+        description: "Gate version to roll out (printed by the Deploy Connect run, or `wrangler versions list`)"
+        type: string
+        required: true
+      percentage:
+        description: "Traffic share for the new version. 0 serves nothing and only runs the canary through a version override."
+        type: choice
+        options:
+          - "0"
+          - "5"
+          - "25"
+          - "100"
+        required: true
+      canary_minutes:
+        description: "How long the canary holds its tunnel after the step"
+        type: number
+        default: 10
+      ticket_canary:
+        description: "Also hold a ticket-dialed tunnel (the new version must have TUNNEL_TICKETS on)"
+        type: boolean
+        default: false
+      auto_rollback:
+        description: "Roll back to the previous version if the canary fails"
+        type: boolean
+        default: true
+
+env:
+  NODE_VERSION: "22.x"
+  PNPM_VERSION: "9.15.0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: connect-gate-rollout-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  rollout:
+    name: Deploy ${{ inputs.version_id }} at ${{ inputs.percentage }}% (${{ inputs.environment }})
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 90
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      VERSION_ID: ${{ inputs.version_id }}
+      PERCENTAGE: ${{ inputs.percentage }}
+      CANARY_MINUTES: ${{ inputs.canary_minutes }}
+      WRANGLER_ENV_ARGS: ${{ inputs.environment == 'staging' && '--env staging' || '' }}
+      WORKER_NAME: ${{ inputs.environment == 'staging' && 'bb-connect-staging' || 'bb-connect' }}
+      ENVIRONMENT: ${{ inputs.environment }}
+      PRODUCTION_CANARY_SERVER_URL: ${{ vars.CONNECT_CANARY_SERVER_URL }}
+      STAGING_CANARY_SERVER_URL: ${{ vars.CONNECT_CANARY_STAGING_SERVER_URL }}
+      PRODUCTION_CANARY_CREDENTIAL: ${{ secrets.CONNECT_CANARY_CREDENTIAL }}
+      STAGING_CANARY_CREDENTIAL: ${{ secrets.CONNECT_CANARY_STAGING_CREDENTIAL }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --prefer-offline
+
+      - name: Select the canary for this environment
+        run: |
+          if [ "$ENVIRONMENT" = staging ]; then
+            url="$STAGING_CANARY_SERVER_URL"; credential="$STAGING_CANARY_CREDENTIAL"; names="CONNECT_CANARY_STAGING_SERVER_URL variable and CONNECT_CANARY_STAGING_CREDENTIAL secret"
+          else
+            url="$PRODUCTION_CANARY_SERVER_URL"; credential="$PRODUCTION_CANARY_CREDENTIAL"; names="CONNECT_CANARY_SERVER_URL variable and CONNECT_CANARY_CREDENTIAL secret"
+          fi
+          if [ -z "$url" ] || [ -z "$credential" ]; then
+            echo "::error::Set the $names. See docs/connect-gate-rollout.md."
+            exit 1
+          fi
+          echo "::add-mask::$credential"
+          {
+            echo "CANARY_SERVER_URL=$url"
+            echo "CONNECT_CANARY_CREDENTIAL=$credential"
+          } >> "$GITHUB_ENV"
+
+      - name: Plan the step
+        id: plan
+        run: |
+          pnpm --filter @bb/connect exec wrangler deployments status $WRANGLER_ENV_ARGS --json > "$RUNNER_TEMP/status.json"
+          echo "Current deployment:"
+          cat "$RUNNER_TEMP/status.json"
+          plan=$(pnpm --silent --filter @bb/connect-rollout run rollout plan \
+            --status-file "$RUNNER_TEMP/status.json" \
+            --version "$VERSION_ID" \
+            --percentage "$PERCENTAGE")
+          echo "specs=$(jq -r '.versionSpecs | join(" ")' <<<"$plan")" >> "$GITHUB_OUTPUT"
+          echo "stable=$(jq -r '.stableVersionId' <<<"$plan")" >> "$GITHUB_OUTPUT"
+
+      - name: Connect a canary that stays connected through the deployment
+        run: |
+          (
+            pnpm --silent --filter @bb/connect-rollout run rollout canary \
+              --server-url "$CANARY_SERVER_URL" \
+              --minutes "$((CANARY_MINUTES + 3))" \
+              --recover-within 120 \
+              --version-override "${WORKER_NAME}=\"${VERSION_ID}\"" \
+              > "$RUNNER_TEMP/canary.log" 2>&1
+            echo $? > "$RUNNER_TEMP/canary.exit"
+          ) &
+          for _ in $(seq 1 60); do
+            if grep -q '"event":"connected"' "$RUNNER_TEMP/canary.log" 2>/dev/null; then exit 0; fi
+            if [ -f "$RUNNER_TEMP/canary.exit" ]; then break; fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/canary.log"
+          echo "::error::The canary could not connect before the deployment; nothing was deployed."
+          exit 1
+
+      - name: Deploy the step
+        id: deploy
+        env:
+          SPECS: ${{ steps.plan.outputs.specs }}
+        run: |
+          pnpm --filter @bb/connect exec wrangler versions deploy $SPECS $WRANGLER_ENV_ARGS \
+            --yes \
+            --message "Roll out ${VERSION_ID} to ${PERCENTAGE}% (run ${GITHUB_RUN_ID})"
+
+      - name: Wait for the canary to reconnect and hold
+        run: |
+          until [ -f "$RUNNER_TEMP/canary.exit" ]; do sleep 5; done
+          cat "$RUNNER_TEMP/canary.log"
+          exit "$(cat "$RUNNER_TEMP/canary.exit")"
+
+      - name: Canary with a tunnel ticket
+        if: inputs.ticket_canary
+        run: |
+          pnpm --silent --filter @bb/connect-rollout run rollout canary \
+            --server-url "$CANARY_SERVER_URL" \
+            --minutes "$CANARY_MINUTES" \
+            --mode ticket \
+            --version-override "${WORKER_NAME}=\"${VERSION_ID}\""
+
+      - name: Roll back after a failed canary
+        if: failure() && inputs.auto_rollback && steps.deploy.outcome == 'success'
+        env:
+          STABLE: ${{ steps.plan.outputs.stable }}
+        run: |
+          pnpm --filter @bb/connect exec wrangler rollback "$STABLE" $WRANGLER_ENV_ARGS \
+            --yes \
+            --message "Canary failed while rolling out ${VERSION_ID} at ${PERCENTAGE}% (run ${GITHUB_RUN_ID})"
+          echo "::error::The canary failed; ${WORKER_NAME} is back on ${STABLE} at 100%."
+
+      - name: Summarize
+        if: always() && steps.plan.outcome == 'success'
+        env:
+          STABLE: ${{ steps.plan.outputs.stable }}
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "### ${WORKER_NAME}: ${VERSION_ID} at ${PERCENTAGE}%"
+            echo
+            echo "- Deploy: ${DEPLOY_OUTCOME}; job: ${JOB_STATUS}"
+            echo "- Previous version (rollback target): \`${STABLE}\`"
+            echo "- Roll back by hand: \`pnpm --filter @bb/connect exec wrangler rollback ${STABLE} ${WRANGLER_ENV_ARGS} -m \"<reason>\"\`"
+            echo "- Before the next step, hold 15-30 minutes and check 503s per host and Durable Object clientDisconnected (docs/connect-gate-rollout.md)."
+          } >> "$GITHUB_STEP_SUMMARY"

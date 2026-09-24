@@ -226,6 +226,8 @@ const worker = spawnService([
   `BETTER_AUTH_SECRET:${DEV_SECRET}`,
   "--var",
   "CLOUD_DEV:true",
+  "--var",
+  "TUNNEL_TICKETS:on",
   "--show-interactive-dev-session=false",
 ]);
 

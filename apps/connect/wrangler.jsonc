@@ -5,8 +5,12 @@
 // then proxies through the per-handle TunnelDO. Staging serves per-handle custom
 // domains attached on demand (e.g. sawyer.vibecodethis.site).
 //
-// Deploy prod:    pnpm --filter @bb/connect exec wrangler deploy
+// Deploy prod:    never `wrangler deploy`. CI uploads a version on merge and
+//                 the Roll out Connect gate workflow moves traffic 5% -> 25% ->
+//                 100%; see docs/connect-gate-rollout.md.
 // Deploy staging: pnpm --filter @bb/connect exec wrangler deploy --env staging
+// TUNNEL_TICKETS: "on" lets the gate accept bbtkt_ tunnel tickets. Anything
+//         else refuses them with 401, and bb falls back to its raw credential.
 // Secret: wrangler secret put BETTER_AUTH_SECRET [--env staging]
 //         (must equal bb-web's BETTER_AUTH_SECRET — the gate verifies the
 //         session cookie's HMAC with it)
@@ -28,7 +32,7 @@
   // Production: every *.getbb.app subdomain hits the gate via the wildcard
   // zone route (backed by a proxied `*` DNS record). The apex + www are
   // custom domains on bb-web and take precedence over this route.
-  "vars": { "BASE_DOMAIN": "getbb.app" },
+  "vars": { "BASE_DOMAIN": "getbb.app", "TUNNEL_TICKETS": "off" },
   "d1_databases": [
     {
       "binding": "DB",
@@ -48,7 +52,7 @@
       "durable_objects": {
         "bindings": [{ "name": "TUNNEL_DO", "class_name": "TunnelDO" }]
       },
-      "vars": { "BASE_DOMAIN": "vibecodethis.site" },
+      "vars": { "BASE_DOMAIN": "vibecodethis.site", "TUNNEL_TICKETS": "on" },
       // Staging now has a dashboard-managed wildcard (`*.vibecodethis.site`
       // proxied DNS + zone route to this worker, added 2026-07-08), matching
       // prod's model — new labels/share hosts need no per-host config. The
