@@ -51,6 +51,7 @@ export interface ServerTargetStore {
   load(): Promise<void>;
   refreshConnectServer(server: ConnectServerRef): Promise<boolean>;
   setConnectServer(server: ConnectServerRef): Promise<void>;
+  setCustomServerName(url: string, name: string | null): Promise<void>;
   setCustomServerUrl(
     url: string | null,
     options?: SetCustomServerUrlOptions,
@@ -75,7 +76,7 @@ const persistedServerTargetSchema = z.object({
 type PersistedServerTarget = z.infer<typeof persistedServerTargetSchema>;
 
 const persistedServerMenuSchema = z.object({
-  customServerNames: z.record(z.string(), z.string()).default({}).catch({}),
+  customServerNames: z.record(z.string(), z.unknown()).default({}).catch({}),
   showBuiltinServer: z.boolean().default(true).catch(true),
 });
 
@@ -105,17 +106,19 @@ export function normalizeCustomServerUrl(rawUrl: string): string | null {
   return parsed.toString().replace(/\/$/u, "");
 }
 
+function collapseServerName(rawName: string): string | null {
+  const collapsed = rawName.trim().replace(/\s+/gu, " ");
+  return collapsed.length === 0 ? null : collapsed;
+}
+
 export function normalizeServerName(rawName: string): string | null {
-  const trimmed = rawName.trim().replace(/\s+/gu, " ");
-  if (trimmed.length === 0) {
-    return null;
-  }
-  if (trimmed.length > MAX_SERVER_NAME_LENGTH) {
+  const name = collapseServerName(rawName);
+  if (name !== null && name.length > MAX_SERVER_NAME_LENGTH) {
     throw new Error(
       `Server names can be at most ${MAX_SERVER_NAME_LENGTH} characters.`,
     );
   }
-  return trimmed;
+  return name;
 }
 
 async function readPersisted<T>(
@@ -147,9 +150,9 @@ export function createServerTargetStore(
     dirname(args.storagePath),
     SERVER_MENU_FILE_NAME,
   );
+  let pendingPersist: Promise<void> = Promise.resolve();
 
-  async function persist(): Promise<void> {
-    await fsImpl.mkdir(dirname(args.storagePath), { recursive: true });
+  function persist(): Promise<void> {
     const payload: PersistedServerTarget = {
       connectServer,
       customServerUrl,
@@ -165,16 +168,21 @@ export function createServerTargetStore(
       ),
       showBuiltinServer,
     };
-    await fsImpl.writeFile(
-      args.storagePath,
-      `${JSON.stringify(payload, null, 2)}\n`,
-      "utf8",
-    );
-    await fsImpl.writeFile(
-      menuStoragePath,
-      `${JSON.stringify(menuPayload, null, 2)}\n`,
-      "utf8",
-    );
+    const write = pendingPersist.then(async () => {
+      await fsImpl.mkdir(dirname(args.storagePath), { recursive: true });
+      await fsImpl.writeFile(
+        args.storagePath,
+        `${JSON.stringify(payload, null, 2)}\n`,
+        "utf8",
+      );
+      await fsImpl.writeFile(
+        menuStoragePath,
+        `${JSON.stringify(menuPayload, null, 2)}\n`,
+        "utf8",
+      );
+    });
+    pendingPersist = write.catch(() => undefined);
+    return write;
   }
 
   return {
@@ -241,9 +249,12 @@ export function createServerTargetStore(
         Object.entries(persistedMenu?.customServerNames ?? {}).flatMap(
           ([rawUrl, rawName]): Array<[string, string]> => {
             const url = normalizeCustomServerUrl(rawUrl);
-            const name = rawName.trim().slice(0, MAX_SERVER_NAME_LENGTH);
+            const name =
+              typeof rawName === "string"
+                ? collapseServerName(rawName)?.slice(0, MAX_SERVER_NAME_LENGTH)
+                : undefined;
             return url === null ||
-              name.length === 0 ||
+              name === undefined ||
               !customServerUrls.includes(url)
               ? []
               : [[url, name]];
@@ -275,6 +286,18 @@ export function createServerTargetStore(
       target = "connect";
       await persist();
     },
+    async setCustomServerName(url, name) {
+      if (!customServerUrls.includes(url)) {
+        throw new Error("That server is no longer saved.");
+      }
+      const normalizedName = name === null ? null : normalizeServerName(name);
+      if (normalizedName === null) {
+        customServerNames.delete(url);
+      } else {
+        customServerNames.set(url, normalizedName);
+      }
+      await persist();
+    },
     async setCustomServerUrl(url, options = {}) {
       const normalized = url === null ? null : normalizeCustomServerUrl(url);
       if (url !== null && normalized === null) {
@@ -299,10 +322,15 @@ export function createServerTargetStore(
       if (normalized === null) {
         customServerUrl = customServerUrls[0] ?? null;
         if (target === "custom") {
-          target = "builtin";
+          target =
+            customServerUrl !== null && !showBuiltinServer
+              ? "custom"
+              : "builtin";
         }
       } else {
         customServerUrl = normalized;
+        const mergesIntoSaved =
+          removedUrl !== null && customServerUrls.includes(normalized);
         if (!customServerUrls.includes(normalized)) {
           customServerUrls.splice(
             removedIndex === -1 ? customServerUrls.length : removedIndex,
@@ -311,10 +339,12 @@ export function createServerTargetStore(
           );
         }
         const nextName = name === undefined ? carriedName : name;
-        if (nextName === null) {
-          customServerNames.delete(normalized);
-        } else if (nextName !== undefined) {
-          customServerNames.set(normalized, nextName);
+        if (!mergesIntoSaved) {
+          if (nextName === null) {
+            customServerNames.delete(normalized);
+          } else if (nextName !== undefined) {
+            customServerNames.set(normalized, nextName);
+          }
         }
         target = "custom";
       }

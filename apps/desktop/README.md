@@ -371,8 +371,10 @@ duplicate, and a name typed there renames it. **This Mac** switches back to the
 built-in server without removing saved entries.
 
 **Set Server URL…** edits the URL and name of the last selected custom server in
-place. Clearing its URL removes that entry and switches an active custom target
-to This Mac. Other saved servers and Connect discovery remain available.
+place. Changing only the name keeps the current server; changing the URL
+selects the edited server, as before. Clearing the URL removes that entry and
+switches an active custom target to This Mac, or to the next saved server while
+This Mac is hidden. Other saved servers and Connect discovery remain available.
 Existing single-server preferences are loaded automatically into the saved list
 in `<userData>/server-target.json`. Names and the Show This Mac choice live in
 `<userData>/server-menu.json`, so `server-target.json` keeps the format older

@@ -266,6 +266,99 @@ describe("server target store", () => {
     expect(reloaded.getShowBuiltinServer()).toBe(false);
   });
 
+  it("renames a saved server without selecting it", async () => {
+    const { fs } = createMemoryFs();
+    const store = createServerTargetStore({ fs, storagePath: "/tmp/t.json" });
+    await store.load();
+    await store.setCustomServerUrl("https://ops.example");
+    await store.setTarget("builtin");
+
+    await store.setCustomServerName("https://ops.example", " ops ");
+    expect(store.getCustomServers()).toEqual([
+      { name: "ops", url: "https://ops.example" },
+    ]);
+    expect(store.getTarget()).toEqual({ kind: "builtin" });
+    await store.setCustomServerName("https://ops.example", null);
+    expect(store.getCustomServers()[0]?.name).toBeNull();
+    await expect(
+      store.setCustomServerName("https://gone.example", "gone"),
+    ).rejects.toThrow(/no longer saved/u);
+  });
+
+  it("keeps the other server's name when an edit points at its URL", async () => {
+    const { fs } = createMemoryFs();
+    const store = createServerTargetStore({ fs, storagePath: "/tmp/t.json" });
+    await store.load();
+    await store.setCustomServerUrl("https://a.example", { name: "ops" });
+    await store.setCustomServerUrl("https://b.example", { name: "lab" });
+
+    await store.setCustomServerUrl("https://b.example", {
+      name: "ops",
+      replacedUrl: "https://a.example",
+    });
+    expect(store.getCustomServers()).toEqual([
+      { name: "lab", url: "https://b.example" },
+    ]);
+    expect(store.getTarget()).toEqual({
+      kind: "custom",
+      url: "https://b.example",
+    });
+  });
+
+  it("falls back to the next saved server when This Mac is hidden", async () => {
+    const { fs } = createMemoryFs();
+    const store = createServerTargetStore({ fs, storagePath: "/tmp/t.json" });
+    await store.load();
+    await store.setCustomServerUrl("https://first.example");
+    await store.setCustomServerUrl("https://second.example");
+    await store.setShowBuiltinServer(false);
+
+    await store.setCustomServerUrl(null);
+    expect(store.getTarget()).toEqual({
+      kind: "custom",
+      url: "https://first.example",
+    });
+    await store.setCustomServerUrl(null);
+    expect(store.getTarget()).toEqual({ kind: "builtin" });
+  });
+
+  it("writes the latest state when saves overlap", async () => {
+    const files = new Map<string, string>();
+    let writes = 0;
+    const store = createServerTargetStore({
+      fs: {
+        async mkdir() {
+          return undefined;
+        },
+        async readFile(path) {
+          const content = files.get(path);
+          if (content === undefined) {
+            throw new Error(`ENOENT: ${path}`);
+          }
+          return content;
+        },
+        async writeFile(path, data) {
+          writes += 1;
+          if (writes === 1) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+          files.set(path, data);
+        },
+      },
+      storagePath: "/tmp/t.json",
+    });
+    await store.load();
+
+    await Promise.all([
+      store.setShowBuiltinServer(false),
+      store.setShowBuiltinServer(true),
+    ]);
+    expect(JSON.parse(files.get("/tmp/server-menu.json") ?? "")).toEqual({
+      customServerNames: {},
+      showBuiltinServer: true,
+    });
+  });
+
   it("keeps server-target.json readable by released desktop builds", async () => {
     const { files, fs } = createMemoryFs();
     const store = createServerTargetStore({ fs, storagePath: "/tmp/t.json" });
@@ -326,12 +419,15 @@ describe("server target store", () => {
     const partial = createServerTargetStore({
       fs: createMemoryFs({
         "/tmp/server-menu.json": JSON.stringify({
-          customServerNames: { "https://ops.example": 42 },
+          customServerNames: {
+            "https://friends.example": "  friends\n\n box ",
+            "https://ops.example": 42,
+          },
           showBuiltinServer: false,
         }),
         "/tmp/t.json": JSON.stringify({
           customServerUrl: "https://ops.example",
-          customServerUrls: ["https://ops.example"],
+          customServerUrls: ["https://ops.example", "https://friends.example"],
           target: "custom",
         }),
       }).fs,
@@ -340,6 +436,7 @@ describe("server target store", () => {
     await partial.load();
     expect(partial.getCustomServers()).toEqual([
       { name: null, url: "https://ops.example" },
+      { name: "friends box", url: "https://friends.example" },
     ]);
     expect(partial.getShowBuiltinServer()).toBe(false);
   });

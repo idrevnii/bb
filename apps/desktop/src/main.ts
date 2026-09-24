@@ -15,7 +15,6 @@ import {
   session,
   shell,
   type Event,
-  type IpcMainEvent,
   type IpcMainInvokeEvent,
   type MessageBoxOptions,
   type WebContents,
@@ -734,9 +733,11 @@ function listMenuConnectServers(): ConnectServerRef[] {
   return servers;
 }
 
-function listDesktopServers(): DesktopServerListEntry[] {
+function listDesktopServers(
+  connectServers: ConnectServerRef[] = listMenuConnectServers(),
+): DesktopServerListEntry[] {
   return buildDesktopServerList({
-    connectServers: listMenuConnectServers(),
+    connectServers,
     customServers: serverTargetStore?.getCustomServers() ?? [],
     showBuiltinServer: serverTargetStore?.getShowBuiltinServer() ?? true,
     target: serverTargetStore?.getTarget() ?? { kind: "builtin" },
@@ -773,7 +774,7 @@ function broadcastServerTargets(servers: BbDesktopServerTarget[]): void {
 
 function refreshApplicationMenu(): void {
   const connectServers = listMenuConnectServers();
-  const servers = listDesktopServers();
+  const servers = listDesktopServers(connectServers);
   installApplicationMenu({
     accelerators: currentApplicationMenuAccelerators,
     connectServersSkipReason:
@@ -1712,6 +1713,11 @@ async function openSetServerUrlDialog(add = false): Promise<void> {
   ) {
     return;
   }
+  if (result.kind === "set" && result.url === previousUrl) {
+    await serverTargetStore.setCustomServerName(previousUrl, result.name);
+    refreshApplicationMenu();
+    return;
+  }
   const name = result.kind === "set" ? result.name : null;
   await serverTargetStore.setCustomServerUrl(
     result.kind === "set" ? result.url : null,
@@ -1720,14 +1726,8 @@ async function openSetServerUrlDialog(add = false): Promise<void> {
       ...(add && name === null ? {} : { name }),
     },
   );
+  refreshApplicationMenu();
   await applyServerTarget();
-}
-
-function isApplicationMainFrameSender(event: IpcMainEvent): boolean {
-  return (
-    applicationWindowWebContentsIds.has(event.sender.id) &&
-    event.senderFrame === event.sender.mainFrame
-  );
 }
 
 function registerServerTargetIpc(): void {
@@ -1741,9 +1741,14 @@ function registerServerTargetIpc(): void {
     BB_DESKTOP_SELECT_SERVER_TARGET_CHANNEL,
     (event, payload: unknown) => {
       const parsed = bbDesktopServerTargetSchema.shape.id.safeParse(payload);
-      if (isApplicationMainFrameSender(event) && parsed.success) {
-        void setActiveServerTarget(parsed.data);
+      if (
+        !applicationWindowWebContentsIds.has(event.sender.id) ||
+        event.senderFrame !== event.sender.mainFrame ||
+        !parsed.success
+      ) {
+        return;
       }
+      void setActiveServerTarget(parsed.data);
     },
   );
 }
