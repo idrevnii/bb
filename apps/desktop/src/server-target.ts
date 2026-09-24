@@ -1,8 +1,9 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { z } from "zod";
 
 export const SERVER_TARGET_FILE_NAME = "server-target.json";
+export const SERVER_MENU_FILE_NAME = "server-menu.json";
 export const BUILTIN_SERVER_NAME = "This Mac";
 export const MAX_SERVER_NAME_LENGTH = 64;
 
@@ -58,26 +59,27 @@ export interface ServerTargetStore {
   setTarget(kind: "builtin" | "connect" | "custom"): Promise<boolean>;
 }
 
-const persistedConnectServerSchema = z
-  .object({
-    handle: z.string().min(1),
-    name: z.string().min(1),
-    url: z.string().min(1),
-  })
-  .strict();
+const persistedConnectServerSchema = z.object({
+  handle: z.string().min(1),
+  name: z.string().min(1),
+  url: z.string().min(1),
+});
 
-const persistedServerTargetSchema = z
-  .object({
-    connectServer: persistedConnectServerSchema.nullable().optional(),
-    customServerNames: z.record(z.string(), z.string().min(1)).default({}),
-    customServerUrl: z.string().min(1).nullable(),
-    customServerUrls: z.array(z.string().min(1)).default([]),
-    showBuiltinServer: z.boolean().default(true),
-    target: z.enum(["builtin", "connect", "custom"]),
-  })
-  .strict();
+const persistedServerTargetSchema = z.object({
+  connectServer: persistedConnectServerSchema.nullable().optional(),
+  customServerUrl: z.string().min(1).nullable(),
+  customServerUrls: z.array(z.string().min(1)).default([]),
+  target: z.enum(["builtin", "connect", "custom"]),
+});
 
 type PersistedServerTarget = z.infer<typeof persistedServerTargetSchema>;
+
+const persistedServerMenuSchema = z.object({
+  customServerNames: z.record(z.string(), z.string()).default({}).catch({}),
+  showBuiltinServer: z.boolean().default(true).catch(true),
+});
+
+type PersistedServerMenu = z.infer<typeof persistedServerMenuSchema>;
 
 const defaultFs: ServerTargetFs = {
   mkdir,
@@ -116,10 +118,14 @@ export function normalizeServerName(rawName: string): string | null {
   return trimmed;
 }
 
-function parsePersistedServerTarget(raw: string): PersistedServerTarget | null {
+async function readPersisted<T>(
+  fsImpl: ServerTargetFs,
+  path: string,
+  schema: z.ZodType<T>,
+): Promise<T | null> {
   try {
-    const parsedJson: unknown = JSON.parse(raw);
-    const parsed = persistedServerTargetSchema.safeParse(parsedJson);
+    const parsedJson: unknown = JSON.parse(await fsImpl.readFile(path, "utf8"));
+    const parsed = schema.safeParse(parsedJson);
     return parsed.success ? parsed.data : null;
   } catch {
     return null;
@@ -137,24 +143,36 @@ export function createServerTargetStore(
   let showBuiltinServer = true;
   let target: "builtin" | "connect" | "custom" = "builtin";
 
+  const menuStoragePath = join(
+    dirname(args.storagePath),
+    SERVER_MENU_FILE_NAME,
+  );
+
   async function persist(): Promise<void> {
     await fsImpl.mkdir(dirname(args.storagePath), { recursive: true });
     const payload: PersistedServerTarget = {
       connectServer,
+      customServerUrl,
+      customServerUrls,
+      target,
+    };
+    const menuPayload: PersistedServerMenu = {
       customServerNames: Object.fromEntries(
         customServerUrls.flatMap((url) => {
           const name = customServerNames.get(url);
           return name === undefined ? [] : [[url, name]];
         }),
       ),
-      customServerUrl,
-      customServerUrls,
       showBuiltinServer,
-      target,
     };
     await fsImpl.writeFile(
       args.storagePath,
       `${JSON.stringify(payload, null, 2)}\n`,
+      "utf8",
+    );
+    await fsImpl.writeFile(
+      menuStoragePath,
+      `${JSON.stringify(menuPayload, null, 2)}\n`,
       "utf8",
     );
   }
@@ -185,20 +203,22 @@ export function createServerTargetStore(
       return { kind: "builtin" };
     },
     async load() {
-      let persisted: PersistedServerTarget | null = null;
-      try {
-        persisted = parsePersistedServerTarget(
-          await fsImpl.readFile(args.storagePath, "utf8"),
-        );
-      } catch {
-        persisted = null;
-      }
+      const persisted = await readPersisted(
+        fsImpl,
+        args.storagePath,
+        persistedServerTargetSchema,
+      );
+      const persistedMenu = await readPersisted(
+        fsImpl,
+        menuStoragePath,
+        persistedServerMenuSchema,
+      );
+      showBuiltinServer = persistedMenu?.showBuiltinServer ?? true;
       if (persisted === null) {
         connectServer = null;
         customServerUrl = null;
         customServerUrls = [];
         customServerNames = new Map();
-        showBuiltinServer = true;
         target = "builtin";
         return;
       }
@@ -218,7 +238,7 @@ export function createServerTargetStore(
         ),
       ];
       customServerNames = new Map(
-        Object.entries(persisted.customServerNames).flatMap(
+        Object.entries(persistedMenu?.customServerNames ?? {}).flatMap(
           ([rawUrl, rawName]): Array<[string, string]> => {
             const url = normalizeCustomServerUrl(rawUrl);
             const name = rawName.trim().slice(0, MAX_SERVER_NAME_LENGTH);
@@ -230,7 +250,6 @@ export function createServerTargetStore(
           },
         ),
       );
-      showBuiltinServer = persisted.showBuiltinServer;
       if (persisted.target === "custom" && customServerUrl !== null) {
         target = "custom";
       } else if (persisted.target === "connect" && connectServer !== null) {

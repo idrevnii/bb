@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
   createServerTargetStore,
   normalizeCustomServerUrl,
@@ -30,6 +31,23 @@ function createMemoryFs(initial: Record<string, string> = {}): {
     },
   };
 }
+
+const releasedServerTargetSchema = z
+  .object({
+    connectServer: z
+      .object({
+        handle: z.string().min(1),
+        name: z.string().min(1),
+        url: z.string().min(1),
+      })
+      .strict()
+      .nullable()
+      .optional(),
+    customServerUrl: z.string().min(1).nullable(),
+    customServerUrls: z.array(z.string().min(1)).default([]),
+    target: z.enum(["builtin", "connect", "custom"]),
+  })
+  .strict();
 
 function customUrls(store: ServerTargetStore): string[] {
   return store.getCustomServers().map((server) => server.url);
@@ -185,6 +203,7 @@ describe("server target store", () => {
     ]);
 
     const before = files.get("/tmp/t.json");
+    const menuBefore = files.get("/tmp/server-menu.json");
     await expect(
       store.setCustomServerUrl("https://friends.example", {
         name: "x".repeat(65),
@@ -192,6 +211,7 @@ describe("server target store", () => {
       }),
     ).rejects.toThrow(/at most 64/u);
     expect(files.get("/tmp/t.json")).toBe(before);
+    expect(files.get("/tmp/server-menu.json")).toBe(menuBefore);
 
     const reloaded = createServerTargetStore({
       fs,
@@ -244,6 +264,84 @@ describe("server target store", () => {
     });
     await reloaded.load();
     expect(reloaded.getShowBuiltinServer()).toBe(false);
+  });
+
+  it("keeps server-target.json readable by released desktop builds", async () => {
+    const { files, fs } = createMemoryFs();
+    const store = createServerTargetStore({ fs, storagePath: "/tmp/t.json" });
+    await store.load();
+    await store.setCustomServerUrl("https://ops.example", { name: "ops" });
+    await store.setShowBuiltinServer(false);
+
+    const written: unknown = JSON.parse(files.get("/tmp/t.json") ?? "");
+    expect(releasedServerTargetSchema.safeParse(written).success).toBe(true);
+    expect(JSON.parse(files.get("/tmp/server-menu.json") ?? "")).toEqual({
+      customServerNames: { "https://ops.example": "ops" },
+      showBuiltinServer: false,
+    });
+  });
+
+  it("loads saved servers from files with fields it does not know", async () => {
+    const { fs } = createMemoryFs({
+      "/tmp/t.json": JSON.stringify({
+        connectServer: null,
+        customServerNames: { "https://ops.example": "ops" },
+        customServerUrl: "https://ops.example",
+        customServerUrls: ["https://ops.example", "https://friends.example"],
+        futureField: { anything: true },
+        showActiveServerName: true,
+        target: "custom",
+      }),
+    });
+    const store = createServerTargetStore({ fs, storagePath: "/tmp/t.json" });
+    await store.load();
+
+    expect(customUrls(store)).toEqual([
+      "https://ops.example",
+      "https://friends.example",
+    ]);
+    expect(store.getTarget()).toEqual({
+      kind: "custom",
+      url: "https://ops.example",
+    });
+  });
+
+  it("keeps saved servers when server-menu.json is missing or corrupt", async () => {
+    const { fs } = createMemoryFs({
+      "/tmp/server-menu.json": "{not json",
+      "/tmp/t.json": JSON.stringify({
+        customServerUrl: "https://ops.example",
+        customServerUrls: ["https://ops.example"],
+        target: "custom",
+      }),
+    });
+    const store = createServerTargetStore({ fs, storagePath: "/tmp/t.json" });
+    await store.load();
+
+    expect(store.getCustomServers()).toEqual([
+      { name: null, url: "https://ops.example" },
+    ]);
+    expect(store.getShowBuiltinServer()).toBe(true);
+
+    const partial = createServerTargetStore({
+      fs: createMemoryFs({
+        "/tmp/server-menu.json": JSON.stringify({
+          customServerNames: { "https://ops.example": 42 },
+          showBuiltinServer: false,
+        }),
+        "/tmp/t.json": JSON.stringify({
+          customServerUrl: "https://ops.example",
+          customServerUrls: ["https://ops.example"],
+          target: "custom",
+        }),
+      }).fs,
+      storagePath: "/tmp/t.json",
+    });
+    await partial.load();
+    expect(partial.getCustomServers()).toEqual([
+      { name: null, url: "https://ops.example" },
+    ]);
+    expect(partial.getShowBuiltinServer()).toBe(false);
   });
 
   it("switches back to builtin while keeping the custom URL", async () => {

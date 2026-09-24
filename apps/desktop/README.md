@@ -374,7 +374,10 @@ built-in server without removing saved entries.
 place. Clearing its URL removes that entry and switches an active custom target
 to This Mac. Other saved servers and Connect discovery remain available.
 Existing single-server preferences are loaded automatically into the saved list
-in `<userData>/server-target.json`, which also stores names by URL.
+in `<userData>/server-target.json`. Names and the Show This Mac choice live in
+`<userData>/server-menu.json`, so `server-target.json` keeps the format older
+desktop builds read. Fields the app does not recognize in either file are
+ignored instead of discarding the saved servers.
 
 Unchecking **Show This Mac** hides the built-in entry from the menu and the
 palette. This Mac stays listed while it is the current server or when no other
