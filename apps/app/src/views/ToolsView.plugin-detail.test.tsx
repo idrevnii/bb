@@ -654,6 +654,48 @@ describe("PluginDetail official catalog lifecycle", () => {
       ),
     ).not.toHaveLength(0);
   });
+
+  it("enables Uninstall for a built-in plugin that is no longer bundled", async () => {
+    const onDelete = vi.fn();
+    const orphanedPlugin = {
+      ...GITHUB_PLUGIN,
+      id: "bb-ai",
+      name: "BB AI",
+      source: "builtin:bb-ai",
+      provenance: "builtin" as const,
+      isOrphanedBuiltin: true,
+      catalogEntryId: null,
+    };
+    const { wrapper: QueryClientWrapper } = createQueryClientTestHarness();
+    render(
+      <MemoryRouter>
+        <QueryClientWrapper>
+          <PluginDetail
+            isLoading={false}
+            plugin={orphanedPlugin}
+            pending={false}
+            openSourceDisabled
+            onToggle={() => {}}
+            onEdit={() => {}}
+            onOpenSource={() => {}}
+            onDelete={onDelete}
+            catalogEntries={[]}
+            onOpenPlugin={() => undefined}
+          />
+        </QueryClientWrapper>
+      </MemoryRouter>,
+    );
+
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "BB AI actions" }),
+    );
+    const uninstall = await screen.findByRole("menuitem", {
+      name: "Uninstall",
+    });
+    expect(uninstall.getAttribute("aria-disabled")).toBeNull();
+    fireEvent.click(uninstall);
+    expect(onDelete).toHaveBeenCalledWith(orphanedPlugin);
+  });
 });
 
 describe("BB Official plugin detail routing", () => {

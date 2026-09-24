@@ -417,7 +417,7 @@ async function callPlugins(
       `Unexpected response from /api/v1/plugins${path} (${response.status}): ${text.slice(0, 200)}`,
     );
   }
-  if (!response.ok && ![400, 404, 422].includes(response.status)) {
+  if (!response.ok && ![400, 404, 409, 422].includes(response.status)) {
     throw new Error(`/api/v1/plugins${path} failed: HTTP ${response.status}`);
   }
   return parsed;

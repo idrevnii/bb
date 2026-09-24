@@ -337,6 +337,8 @@ export function PluginDetail({
     settingsSections.some((section) => section.pluginId === plugin.id);
 
   const pluginName = plugin.name ?? plugin.id;
+  const pluginIsIncluded =
+    plugin.provenance === "builtin" && !plugin.isOrphanedBuiltin;
   const overflowItems: ResourceOverflowMenuItem[] = [
     ...(canEditSource
       ? [
@@ -352,11 +354,10 @@ export function PluginDetail({
       label: pluginRemovalLabel(plugin),
       icon: "Trash2" as const,
       tone: "destructive" as const,
-      disabled: pending || plugin.provenance === "builtin",
-      disabledReason:
-        plugin.provenance === "builtin"
-          ? "Included with BB; disable this plugin instead."
-          : undefined,
+      disabled: pending || pluginIsIncluded,
+      disabledReason: pluginIsIncluded
+        ? "Included with BB; disable this plugin instead."
+        : undefined,
       onSelect: () => onDelete(plugin),
     },
   ];

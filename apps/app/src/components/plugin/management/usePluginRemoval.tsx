@@ -20,16 +20,20 @@ import {
   type PluginListItem,
 } from "@/hooks/queries/plugin-settings-queries";
 
+function isIncludedPlugin(plugin: PluginListItem): boolean {
+  return (
+    !plugin.isOrphanedBuiltin &&
+    (plugin.provenance === "builtin" || plugin.source.startsWith("builtin:"))
+  );
+}
+
 export function usePluginRemoval() {
   const queryClient = useQueryClient();
   const [target, setTarget] = useState<PluginListItem | null>(null);
   const mutation = useMutation({
     meta: { showErrorToast: false },
     mutationFn: (plugin: PluginListItem) => {
-      if (
-        plugin.provenance === "builtin" ||
-        plugin.source.startsWith("builtin:")
-      ) {
+      if (isIncludedPlugin(plugin)) {
         throw new Error("Included plugins cannot be uninstalled.");
       }
       return removePlugin(fetch, plugin.id);
@@ -62,11 +66,7 @@ export function usePluginRemoval() {
     target,
     pending: mutation.isPending,
     open: (plugin: PluginListItem) => {
-      if (
-        plugin.provenance !== "builtin" &&
-        !plugin.source.startsWith("builtin:")
-      )
-        setTarget(plugin);
+      if (!isIncludedPlugin(plugin)) setTarget(plugin);
     },
     close: () => {
       if (!mutation.isPending) setTarget(null);

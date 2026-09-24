@@ -385,6 +385,28 @@ describe("builtin plugin reconciliation", () => {
     ]);
   });
 
+  it("lets an orphaned builtin be removed while bundled builtins stay protected", async () => {
+    service = createService({ db, dataDir: join(workDir, "data") });
+    await service.start();
+    expect(service.isBundledBuiltin("builtin-fixture")).toBe(true);
+    await service.stop();
+
+    service = createService({
+      db,
+      dataDir: join(workDir, "data"),
+      includeBuiltin: false,
+    });
+    await service.start();
+    expect(service.isBundledBuiltin("builtin-fixture")).toBe(false);
+    await expect(service.remove("builtin-fixture")).resolves.toBe(true);
+    expect(service.list()).toEqual([]);
+    await service.stop();
+
+    service = createService({ db, dataDir: join(workDir, "data") });
+    await service.start();
+    expect(service.list()).toEqual([]);
+  });
+
   it("backfills every legacy source form once while preserving registration state", async () => {
     const sha = "0123456789abcdef0123456789abcdef01234567";
     const legacyRoot = join(workDir, "missing-legacy-root");

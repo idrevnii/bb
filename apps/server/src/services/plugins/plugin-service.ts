@@ -219,7 +219,7 @@ export interface PluginStartOptions {
 }
 
 export interface PluginService {
-  isBuiltin(id: string): boolean;
+  isBundledBuiltin(id: string): boolean;
   events: PluginThreadEventEmitter;
   /** The hook chain the dispatch pipeline consults; registered in createApp. */
   hooks: PluginHookProvider;
@@ -559,6 +559,12 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
   }
   const bundledPlugins =
     deps.bundledPlugins ?? listBundledPluginRegistrations();
+  function isOrphanedBuiltinRow(row: InstalledPluginRow): boolean {
+    return (
+      row.sourceKind === "builtin" &&
+      !bundledPlugins.some((bundled) => bundled.name === row.sourceBuiltinName)
+    );
+  }
   const mentionSearchTimeoutMs =
     deps.mentionSearchTimeoutMs ?? DEFAULT_MENTION_SEARCH_TIMEOUT_MS;
   const mentionResolveTimeoutMs =
@@ -608,7 +614,6 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     hostArtifacts,
     identities,
     invokeWrapped,
-    isBuiltinPluginId,
     listPluginHooks,
     listPluginEnvironmentCompositions,
     listPluginEnvironmentProviders,
@@ -1006,11 +1011,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
             catalogMarketplaceName: row.catalogMarketplaceName,
             labels: catalogData.publisherLabels,
           }),
-          isOrphanedBuiltin:
-            row.sourceKind === "builtin" &&
-            !bundledPlugins.some(
-              (bundled) => bundled.name === row.sourceBuiltinName,
-            ),
+          isOrphanedBuiltin: isOrphanedBuiltinRow(row),
           sourceDisplay: sourceDisplayForRow(row),
           updateState: updateStateForRow(row),
           enabled: row.enabled,
@@ -1185,7 +1186,14 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
   }
 
   return {
-    isBuiltin: isBuiltinPluginId,
+    isBundledBuiltin(id) {
+      const row = getInstalledPlugin(deps.db, id);
+      return (
+        row !== undefined &&
+        row.provenance === "builtin" &&
+        !isOrphanedBuiltinRow(row)
+      );
+    },
 
     listThemes() {
       return [...loaded.entries()]

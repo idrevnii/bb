@@ -731,7 +731,7 @@ export function registerPluginRoutes(
 
   app.delete("/plugins/:id", async (context) => {
     const id = context.req.param("id");
-    if (plugins.isBuiltin(id)) {
+    if (plugins.isBundledBuiltin(id)) {
       return context.json(
         {
           ok: false,
