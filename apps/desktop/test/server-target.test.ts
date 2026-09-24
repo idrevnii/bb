@@ -3,6 +3,7 @@ import {
   createServerTargetStore,
   normalizeCustomServerUrl,
   type ServerTargetFs,
+  type ServerTargetStore,
 } from "../src/server-target.js";
 
 function createMemoryFs(initial: Record<string, string> = {}): {
@@ -28,6 +29,10 @@ function createMemoryFs(initial: Record<string, string> = {}): {
       },
     },
   };
+}
+
+function customUrls(store: ServerTargetStore): string[] {
+  return store.getCustomServers().map((server) => server.url);
 }
 
 describe("normalizeCustomServerUrl", () => {
@@ -87,7 +92,7 @@ describe("server target store", () => {
       storagePath: "/tmp/t.json",
     });
     await reloaded.load();
-    expect(reloaded.getCustomServerUrls()).toEqual([
+    expect(customUrls(reloaded)).toEqual([
       "https://first.example",
       "https://second.example",
     ]);
@@ -96,7 +101,7 @@ describe("server target store", () => {
       url: "https://first.example",
     });
     await reloaded.setTarget("builtin");
-    expect(reloaded.getCustomServerUrls()).toHaveLength(2);
+    expect(customUrls(reloaded)).toHaveLength(2);
   });
 
   it("migrates the legacy custom server and preserves it when adding another", async () => {
@@ -113,7 +118,7 @@ describe("server target store", () => {
       url: "https://old.example",
     });
     await store.setCustomServerUrl("https://new.example");
-    expect(store.getCustomServerUrls()).toEqual([
+    expect(customUrls(store)).toEqual([
       "https://old.example",
       "https://new.example",
     ]);
@@ -125,28 +130,120 @@ describe("server target store", () => {
     await store.load();
     await store.setCustomServerUrl("https://first.example");
     await store.setCustomServerUrl("https://second.example");
-    await store.setCustomServerUrl(
-      "https://edited.example",
-      "https://second.example",
-    );
-    expect(store.getCustomServerUrls()).toEqual([
+    await store.setCustomServerUrl("https://edited.example", {
+      replacedUrl: "https://second.example",
+    });
+    expect(customUrls(store)).toEqual([
       "https://first.example",
       "https://edited.example",
     ]);
     await expect(
-      store.setCustomServerUrl("file:///bad", "https://edited.example"),
+      store.setCustomServerUrl("file:///bad", {
+        replacedUrl: "https://edited.example",
+      }),
     ).rejects.toThrow();
-    expect(store.getCustomServerUrls()).toHaveLength(2);
+    expect(customUrls(store)).toHaveLength(2);
     await store.setCustomServerUrl(null);
     expect(store.getTarget()).toEqual({ kind: "builtin" });
-    expect(store.getCustomServerUrls()).toEqual(["https://first.example"]);
+    expect(customUrls(store)).toEqual(["https://first.example"]);
     const reloaded = createServerTargetStore({
       fs,
       storagePath: "/tmp/t.json",
     });
     await reloaded.load();
-    expect(reloaded.getCustomServerUrls()).toEqual(["https://first.example"]);
+    expect(customUrls(reloaded)).toEqual(["https://first.example"]);
     expect(reloaded.getTarget()).toEqual({ kind: "builtin" });
+  });
+
+  it("names servers, keeps names across selection and edits, and clears them", async () => {
+    const { files, fs } = createMemoryFs();
+    const store = createServerTargetStore({ fs, storagePath: "/tmp/t.json" });
+    await store.load();
+    await store.setCustomServerUrl("https://ops.example", {
+      name: "  ops   box ",
+    });
+    await store.setCustomServerUrl("https://friends.example");
+    await store.setCustomServerUrl("https://third.example");
+    await store.setCustomServerUrl("https://ops.example");
+    expect(store.getCustomServers()).toEqual([
+      { name: "ops box", url: "https://ops.example" },
+      { name: null, url: "https://friends.example" },
+      { name: null, url: "https://third.example" },
+    ]);
+
+    await store.setCustomServerUrl("https://ops.example:38886", {
+      replacedUrl: "https://ops.example",
+    });
+    await store.setCustomServerUrl("https://friends.example", {
+      name: "friends",
+      replacedUrl: "https://friends.example",
+    });
+    expect(store.getCustomServers()).toEqual([
+      { name: "ops box", url: "https://ops.example:38886" },
+      { name: "friends", url: "https://friends.example" },
+      { name: null, url: "https://third.example" },
+    ]);
+
+    const before = files.get("/tmp/t.json");
+    await expect(
+      store.setCustomServerUrl("https://friends.example", {
+        name: "x".repeat(65),
+        replacedUrl: "https://friends.example",
+      }),
+    ).rejects.toThrow(/at most 64/u);
+    expect(files.get("/tmp/t.json")).toBe(before);
+
+    const reloaded = createServerTargetStore({
+      fs,
+      storagePath: "/tmp/t.json",
+    });
+    await reloaded.load();
+    expect(reloaded.getCustomServers()).toEqual(store.getCustomServers());
+
+    await reloaded.setCustomServerUrl("https://friends.example", {
+      name: null,
+      replacedUrl: "https://friends.example",
+    });
+    expect(reloaded.getCustomServers()[1]).toEqual({
+      name: null,
+      url: "https://friends.example",
+    });
+    await reloaded.setCustomServerUrl(null, {
+      replacedUrl: "https://ops.example:38886",
+    });
+    expect(reloaded.getCustomServers()).toEqual([
+      { name: null, url: "https://friends.example" },
+      { name: null, url: "https://third.example" },
+    ]);
+  });
+
+  it("persists whether This Mac is shown and defaults older files to shown", async () => {
+    const legacy = createServerTargetStore({
+      fs: createMemoryFs({
+        "/tmp/t.json": JSON.stringify({
+          customServerUrl: "https://old.example",
+          customServerUrls: ["https://old.example"],
+          target: "custom",
+        }),
+      }).fs,
+      storagePath: "/tmp/t.json",
+    });
+    await legacy.load();
+    expect(legacy.getShowBuiltinServer()).toBe(true);
+    expect(legacy.getCustomServers()).toEqual([
+      { name: null, url: "https://old.example" },
+    ]);
+
+    const { fs } = createMemoryFs();
+    const store = createServerTargetStore({ fs, storagePath: "/tmp/t.json" });
+    await store.load();
+    await store.setShowBuiltinServer(false);
+    const reloaded = createServerTargetStore({
+      fs,
+      storagePath: "/tmp/t.json",
+    });
+    await reloaded.load();
+    expect(reloaded.getShowBuiltinServer()).toBe(false);
   });
 
   it("switches back to builtin while keeping the custom URL", async () => {

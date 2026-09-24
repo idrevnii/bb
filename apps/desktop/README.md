@@ -364,14 +364,28 @@ recovery path for those cases.
 ### Saved servers
 
 Use **bb → Desktop Settings → Server → Add Server…** to save and switch to
-another machine's HTTP(S) bb server URL. **Window → Server** opens the same menu. Saved URLs remain in the menu across restarts; adding an
-existing URL selects it without creating a duplicate. **This Mac** switches back
-to the built-in server without removing saved entries.
+another machine's HTTP(S) bb server URL. **Window → Server** opens the same
+menu. The optional name replaces the host in the menu. Saved URLs remain in the
+menu across restarts; adding an existing URL selects it without creating a
+duplicate, and a name typed there renames it. **This Mac** switches back to the
+built-in server without removing saved entries.
 
-**Set Server URL…** edits the last selected custom server. Clearing its URL removes
-that entry and switches an active custom target to This Mac. Other saved servers
-and Connect discovery remain available. Existing single-server preferences are
-loaded automatically into the saved list in `<userData>/server-target.json`.
+**Set Server URL…** edits the URL and name of the last selected custom server in
+place. Clearing its URL removes that entry and switches an active custom target
+to This Mac. Other saved servers and Connect discovery remain available.
+Existing single-server preferences are loaded automatically into the saved list
+in `<userData>/server-target.json`, which also stores names by URL.
+
+Unchecking **Show This Mac** hides the built-in entry from the menu and the
+palette. This Mac stays listed while it is the current server or when no other
+server is saved. Hiding it does not stop a local server that is already
+running.
+
+The quick palette offers **Switch to server: <name>** for every other listed
+server. The rendered app reads the list through the optional
+`getServerTargets`, `onServerTargetsChange`, and `selectServerTarget` members of
+`BbDesktopApi`, which expose names and opaque ids but not saved URLs. Selection
+runs through the same path as the menu.
 
 ### Server moves
 

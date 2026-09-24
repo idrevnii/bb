@@ -12,6 +12,7 @@ import {
   buildApplicationMenuTemplate,
   CONNECT_SERVERS_SKIPPED_MENU_LABELS,
   SET_SERVER_URL_MENU_LABEL,
+  SHOW_BUILTIN_SERVER_MENU_LABEL,
   type InstallApplicationMenuArgs,
 } from "../src/menu.js";
 
@@ -44,6 +45,8 @@ function menuArgs(
     servers: [{ checked: true, id: "builtin", name: "This Mac" }],
     setServerUrl: () => {},
     addServer: () => {},
+    showBuiltinServer: true,
+    toggleBuiltinServer: () => {},
     ...overrides,
   };
 }
@@ -176,7 +179,7 @@ describe("application menu", () => {
     );
     const serverSubmenu = findServerSubmenu(template);
 
-    expect(serverSubmenu).toHaveLength(6);
+    expect(serverSubmenu).toHaveLength(8);
     expect(
       serverSubmenu.slice(0, 3).map((item) => [item.type, item.checked]),
     ).toEqual([
@@ -231,6 +234,8 @@ describe("application menu", () => {
       "<separator>",
       "Add Server…",
       SET_SERVER_URL_MENU_LABEL,
+      "<separator>",
+      SHOW_BUILTIN_SERVER_MENU_LABEL,
     ]);
     expect(labels(findServerSubmenu(template))).toEqual(
       labels(desktopSettingsServerSubmenu),
@@ -247,6 +252,28 @@ describe("application menu", () => {
     );
     expect(selectServer).toHaveBeenCalledWith("custom:https://first.example");
     expect(addServer).toHaveBeenCalledTimes(1);
+  });
+
+  it("toggles whether This Mac is listed from a checkbox", () => {
+    const toggleBuiltinServer = vi.fn();
+    const template = buildApplicationMenuTemplate(
+      menuArgs(() => {}, { showBuiltinServer: false, toggleBuiltinServer }),
+    );
+
+    for (const serverSubmenu of [
+      findServerSubmenu(template),
+      findDesktopSettingsServerSubmenu(template),
+    ]) {
+      const toggle = serverSubmenu.at(-1);
+      expect(serverSubmenu.at(-2)?.type).toBe("separator");
+      expect(toggle).toMatchObject({
+        checked: false,
+        label: SHOW_BUILTIN_SERVER_MENU_LABEL,
+        type: "checkbox",
+      });
+      toggle?.click?.({} as never, undefined, {} as never);
+    }
+    expect(toggleBuiltinServer).toHaveBeenCalledTimes(2);
   });
 
   it("explains an empty Connect list with a disabled row when the sync was skipped", () => {
@@ -273,6 +300,8 @@ describe("application menu", () => {
         "<separator>",
         "Add Server…",
         SET_SERVER_URL_MENU_LABEL,
+        "<separator>",
+        SHOW_BUILTIN_SERVER_MENU_LABEL,
       ],
     );
     const note = serverSubmenu[2];

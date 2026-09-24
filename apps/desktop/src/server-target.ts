@@ -4,6 +4,7 @@ import { z } from "zod";
 
 export const SERVER_TARGET_FILE_NAME = "server-target.json";
 export const BUILTIN_SERVER_NAME = "This Mac";
+export const MAX_SERVER_NAME_LENGTH = 64;
 
 export interface ConnectServerRef {
   handle: string;
@@ -11,7 +12,17 @@ export interface ConnectServerRef {
   url: string;
 }
 
-type DesktopServerTarget =
+export interface CustomServer {
+  name: string | null;
+  url: string;
+}
+
+interface SetCustomServerUrlOptions {
+  name?: string | null;
+  replacedUrl?: string;
+}
+
+export type DesktopServerTarget =
   | { kind: "builtin" }
   | { kind: "connect"; server: ConnectServerRef }
   | { kind: "custom"; url: string };
@@ -33,12 +44,17 @@ interface CreateServerTargetStoreArgs {
 export interface ServerTargetStore {
   getConnectServer(): ConnectServerRef | null;
   getCustomServerUrl(): string | null;
-  getCustomServerUrls(): string[];
+  getCustomServers(): CustomServer[];
+  getShowBuiltinServer(): boolean;
   getTarget(): DesktopServerTarget;
   load(): Promise<void>;
   refreshConnectServer(server: ConnectServerRef): Promise<boolean>;
   setConnectServer(server: ConnectServerRef): Promise<void>;
-  setCustomServerUrl(url: string | null, replacedUrl?: string): Promise<void>;
+  setCustomServerUrl(
+    url: string | null,
+    options?: SetCustomServerUrlOptions,
+  ): Promise<void>;
+  setShowBuiltinServer(show: boolean): Promise<void>;
   setTarget(kind: "builtin" | "connect" | "custom"): Promise<boolean>;
 }
 
@@ -53,8 +69,10 @@ const persistedConnectServerSchema = z
 const persistedServerTargetSchema = z
   .object({
     connectServer: persistedConnectServerSchema.nullable().optional(),
+    customServerNames: z.record(z.string(), z.string().min(1)).default({}),
     customServerUrl: z.string().min(1).nullable(),
     customServerUrls: z.array(z.string().min(1)).default([]),
+    showBuiltinServer: z.boolean().default(true),
     target: z.enum(["builtin", "connect", "custom"]),
   })
   .strict();
@@ -85,6 +103,19 @@ export function normalizeCustomServerUrl(rawUrl: string): string | null {
   return parsed.toString().replace(/\/$/u, "");
 }
 
+export function normalizeServerName(rawName: string): string | null {
+  const trimmed = rawName.trim().replace(/\s+/gu, " ");
+  if (trimmed.length === 0) {
+    return null;
+  }
+  if (trimmed.length > MAX_SERVER_NAME_LENGTH) {
+    throw new Error(
+      `Server names can be at most ${MAX_SERVER_NAME_LENGTH} characters.`,
+    );
+  }
+  return trimmed;
+}
+
 function parsePersistedServerTarget(raw: string): PersistedServerTarget | null {
   try {
     const parsedJson: unknown = JSON.parse(raw);
@@ -102,14 +133,23 @@ export function createServerTargetStore(
   let connectServer: ConnectServerRef | null = null;
   let customServerUrl: string | null = null;
   let customServerUrls: string[] = [];
+  let customServerNames = new Map<string, string>();
+  let showBuiltinServer = true;
   let target: "builtin" | "connect" | "custom" = "builtin";
 
   async function persist(): Promise<void> {
     await fsImpl.mkdir(dirname(args.storagePath), { recursive: true });
     const payload: PersistedServerTarget = {
       connectServer,
+      customServerNames: Object.fromEntries(
+        customServerUrls.flatMap((url) => {
+          const name = customServerNames.get(url);
+          return name === undefined ? [] : [[url, name]];
+        }),
+      ),
       customServerUrl,
       customServerUrls,
+      showBuiltinServer,
       target,
     };
     await fsImpl.writeFile(
@@ -126,8 +166,14 @@ export function createServerTargetStore(
     getCustomServerUrl() {
       return customServerUrl;
     },
-    getCustomServerUrls() {
-      return [...customServerUrls];
+    getCustomServers() {
+      return customServerUrls.map((url) => ({
+        name: customServerNames.get(url) ?? null,
+        url,
+      }));
+    },
+    getShowBuiltinServer() {
+      return showBuiltinServer;
     },
     getTarget() {
       if (target === "custom" && customServerUrl !== null) {
@@ -151,6 +197,8 @@ export function createServerTargetStore(
         connectServer = null;
         customServerUrl = null;
         customServerUrls = [];
+        customServerNames = new Map();
+        showBuiltinServer = true;
         target = "builtin";
         return;
       }
@@ -169,6 +217,20 @@ export function createServerTargetStore(
             .filter((url): url is string => url !== null),
         ),
       ];
+      customServerNames = new Map(
+        Object.entries(persisted.customServerNames).flatMap(
+          ([rawUrl, rawName]): Array<[string, string]> => {
+            const url = normalizeCustomServerUrl(rawUrl);
+            const name = rawName.trim().slice(0, MAX_SERVER_NAME_LENGTH);
+            return url === null ||
+              name.length === 0 ||
+              !customServerUrls.includes(url)
+              ? []
+              : [[url, name]];
+          },
+        ),
+      );
+      showBuiltinServer = persisted.showBuiltinServer;
       if (persisted.target === "custom" && customServerUrl !== null) {
         target = "custom";
       } else if (persisted.target === "connect" && connectServer !== null) {
@@ -194,15 +256,27 @@ export function createServerTargetStore(
       target = "connect";
       await persist();
     },
-    async setCustomServerUrl(url, replacedUrl) {
+    async setCustomServerUrl(url, options = {}) {
       const normalized = url === null ? null : normalizeCustomServerUrl(url);
       if (url !== null && normalized === null) {
         throw new Error("Enter a valid http(s) URL.");
       }
-      const removedUrl = replacedUrl ?? (url === null ? customServerUrl : null);
+      const name =
+        options.name === undefined || options.name === null
+          ? options.name
+          : normalizeServerName(options.name);
+      const removedUrl =
+        options.replacedUrl ?? (url === null ? customServerUrl : null);
+      const removedIndex =
+        removedUrl === null ? -1 : customServerUrls.indexOf(removedUrl);
+      const carriedName =
+        removedUrl === null ? undefined : customServerNames.get(removedUrl);
       customServerUrls = customServerUrls.filter(
         (saved) => saved !== removedUrl,
       );
+      if (removedUrl !== null) {
+        customServerNames.delete(removedUrl);
+      }
       if (normalized === null) {
         customServerUrl = customServerUrls[0] ?? null;
         if (target === "custom") {
@@ -211,10 +285,24 @@ export function createServerTargetStore(
       } else {
         customServerUrl = normalized;
         if (!customServerUrls.includes(normalized)) {
-          customServerUrls.push(normalized);
+          customServerUrls.splice(
+            removedIndex === -1 ? customServerUrls.length : removedIndex,
+            0,
+            normalized,
+          );
+        }
+        const nextName = name === undefined ? carriedName : name;
+        if (nextName === null) {
+          customServerNames.delete(normalized);
+        } else if (nextName !== undefined) {
+          customServerNames.set(normalized, nextName);
         }
         target = "custom";
       }
+      await persist();
+    },
+    async setShowBuiltinServer(show) {
+      showBuiltinServer = show;
       await persist();
     },
     async setTarget(kind) {
